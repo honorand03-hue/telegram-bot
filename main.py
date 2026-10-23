@@ -2,7 +2,7 @@ import os
 import requests
 import yt_dlp
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultVideo
 from flask import Flask, request
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,10 +13,9 @@ app = Flask(__name__)
 bot = telebot.TeleBot(BOT_TOKEN)
 
 def resolve_url(url):
-    # حل مشكلة روابط /share/
     if "facebook.com/share" in url or "fb.watch" in url:
         try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, allow_redirects=True, timeout=15)
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True, timeout=15)
             return r.url
         except:
             return url
@@ -27,9 +26,47 @@ def is_subscribed(user_id):
         member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status in ['creator', 'administrator', 'member']
     except Exception as e:
-        # اذا البوت مو ادمن لا تعلق الناس، اعتبرو مشترك
         print(f"Check sub error: {e}")
         return True 
+
+# ===== ميزة الـ INLINE الجديدة - هون السر تبع الانتشار =====
+@bot.inline_handler(func=lambda query: True)
+def inline_query_handler(inline_query):
+    text = inline_query.query.strip()
+    if not text.startswith("http"):
+        # اذا ما كتب رابط، اعطيه تعليمات
+        return
+    
+    try:
+        url = resolve_url(text)
+        ydl_opts = {
+            'format': 'best[height<=720]',
+            'quiet': True,
+            'noplaylist': True,
+            'skip_download': True,
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            video_url = info.get('url')
+            thumb = info.get('thumbnail', '')
+            title = info.get('title', 'فيديو')[:50]
+
+            if not video_url:
+                return
+
+            result = InlineQueryResultVideo(
+                id="1",
+                video_url=video_url,
+                mime_type="video/mp4",
+                thumb_url=thumb,
+                title=f"✅ {title}",
+                caption="تم التحميل عبر @MyDownload2026_bot",
+                description="اضغط لإرسال الفيديو"
+            )
+            bot.answer_inline_query(inline_query.id, [result], cache_time=1)
+    except Exception as e:
+        print(f"Inline error: {e}")
+# ===== نهاية ميزة الـ INLINE =====
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -37,12 +74,9 @@ def start(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📢 اشترك بالقناة الرسمية", url=CHANNEL_LINK))
         markup.add(InlineKeyboardButton("✅ تحققت، اشتركت", callback_data="check_sub"))
-        bot.send_message(message.chat.id, 
-            "يا هلا! 🔥\n\nلازم تشترك بقناتنا @BotKanal24 أول شي مشان يشتغل البوت معك:",
-            reply_markup=markup)
+        bot.send_message(message.chat.id, "يا هلا! 🔥\n\nلازم تشترك بقناتنا @BotKanal24 أول شي مشان يشتغل البوت معك:", reply_markup=markup)
         return
-
-    text = "اهلا بيك بـ بوت التحميل السريع\n\nيحمل بجودة HD - بدون علامة مائية\nتيك توك | انستا | يوتيوب | فيسبوك\n\nبس ابعت الرابط وانا بجيبو بثانية"
+    text = "اهلا بيك بـ بوت التحميل السريع\n\nيحمل بجودة HD - بدون علامة مائية\nتيك توك | انستا | يوتيوب | فيسبوك\n\nبس ابعت الرابط وانا بجيبو بثانية\n\n💡 **ميزة جديدة:** فيك تستخدم البوت بأي جروب! بس اكتب @MyDownload2026_bot + الرابط"
     bot.send_message(message.chat.id, text)
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_sub")
@@ -68,15 +102,13 @@ def handle(message):
     
     url = resolve_url(url)
     wait = bot.reply_to(message, "⏳ عم حمل... ثانية وحدة")
-
     try:
-        # اهم تعديل لحل خطأ 413
         ydl_opts = {
             'format': 'bestvideo[height<=720][filesize<50M]+bestaudio/best[height<=720][filesize<50M]/best',
             'outtmpl': '/tmp/%(id)s.%(ext)s',
             'quiet': True,
             'noplaylist': True,
-            'max_filesize': 50 * 1024 * 1024, # 50 ميغا حد اقصى
+            'max_filesize': 50 * 1024 * 1024,
             'http_headers': {'User-Agent': 'Mozilla/5.0'},
             'merge_output_format': 'mp4'
         }
@@ -84,7 +116,6 @@ def handle(message):
             info = ydl.extract_info(url, download=True)
             file = ydl.prepare_filename(info)
         
-        # فحص الحجم بعد التحميل
         if os.path.getsize(file) > 50 * 1024 * 1024:
             os.remove(file)
             bot.edit_message_text("❌ الفيديو كبير كتير (اكتر من 50 ميغا) جرب فيديو اقصر بجودة اقل", message.chat.id, wait.message_id)
@@ -95,13 +126,10 @@ def handle(message):
         
         os.remove(file)
         bot.delete_message(message.chat.id, wait.message_id)
-
     except Exception as e:
         err = str(e)
         if "Too Large" in err or "413" in err or "too large" in err.lower():
             msg = "❌ الفيديو حجمو كبير كتير، ما بقدر ابعتو عالتليجرام (الحد 50 ميغا). جرب فيديو اقصر."
-        elif "facebook.com/share" in url:
-            msg = "❌ رابط المشاركة هذا ما بينقرا. افتح الفيديو واضغط نسخ الرابط الحقيقي يلي فيه watch"
         else:
             msg = f"فشل: {err[:200]}"
         bot.edit_message_text(msg, message.chat.id, wait.message_id)
