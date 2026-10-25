@@ -10,7 +10,7 @@ CHANNEL_USERNAME = "@BotKanal24"
 CHANNEL_LINK = "https://t.me/BotKanal24"
 
 app = Flask(__name__)
-bot = telebot.TeleBot(BOT_TOKEN) # لازم يكون هون قبل كل الدوال
+bot = telebot.TeleBot(BOT_TOKEN)
 
 def resolve_url(url):
     if "facebook.com/share" in url or "fb.watch" in url:
@@ -25,18 +25,16 @@ def is_subscribed(user_id):
     try:
         member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status in ['creator', 'administrator', 'member']
-    except Exception as e:
-        print(f"Check sub error: {e}")
-        return True 
+    except:
+        return True
 
 @bot.inline_handler(func=lambda query: True)
 def inline_query_handler(inline_query):
     text = inline_query.query.strip()
-    if not text.startswith("http"):
-        return
+    if not text.startswith("http"): return
     try:
         url = resolve_url(text)
-        ydl_opts = {'format': 'best[height<=720]','quiet': True,'noplaylist': True,'skip_download': True,}
+        ydl_opts = {'format': 'best[height<=720]','quiet': True,'noplaylist': True,'skip_download': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             video_url = info.get('url')
@@ -54,18 +52,37 @@ def start(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📢 اشترك بالقناة الرسمية", url=CHANNEL_LINK))
         markup.add(InlineKeyboardButton("✅ تحققت، اشتركت", callback_data="check_sub"))
-        bot.send_message(message.chat.id, "يا هلا! 🔥\n\nلازم تشترك بقناتنا @BotKanal24 أول شي مشان يشتغل البوت معك:", reply_markup=markup)
+        bot.send_message(message.chat.id, "يا هلا! 🔥\nلازم تشترك بقناتنا @BotKanal24 أول شي:", reply_markup=markup)
         return
-    text = "اهلا بيك بـ بوت التحميل السريع\n\nيحمل بجودة HD - بدون علامة مائية\nتيك توك | انستا | يوتيوب | فيسبوك\n\nبس ابعت الرابط وانا بجيبو بثانية\n\n💡 **ميزة جديدة:** فيك تستخدم البوت بأي جروب! بس اكتب @MyDownload2026_bot + الرابط"
-    bot.send_message(message.chat.id, text)
+    bot.send_message(message.chat.id, "اهلا بيك بـ بوت التحميل السريع\nيحمل HD - بدون علامة مائية\nتيك توك | انستا | يوتيوب | فيسبوك\n\n💡 **جديد:** رح ابعتلك الفيديو مع زر تحويله لموسيقى MP3 فوراً!")
 
-@bot.callback_query_handler(func=lambda call: call.data == "check_sub")
-def check_sub_callback(call):
-    if is_subscribed(call.from_user.id):
-        bot.answer_callback_query(call.id, "تم الاشتراك بنجاح ✅")
-        bot.send_message(call.message.chat.id, "تمام اشتركت! هلا ابعت الرابط وبحملو فوراً 🚀")
-    else:
-        bot.answer_callback_query(call.id, "لسا ما اشتركت 😅 - تأكد انك ضغطت انضمام بالقناة", show_alert=True)
+@bot.callback_query_handler(func=lambda call: True)
+def all_callbacks(call):
+    if call.data == "check_sub":
+        if is_subscribed(call.from_user.id):
+            bot.answer_callback_query(call.id, "تم ✅")
+            bot.send_message(call.message.chat.id, "تمام! ابعت الرابط 🚀")
+        else:
+            bot.answer_callback_query(call.id, "لسا ما اشتركت 😅", show_alert=True)
+        return
+
+    # زر تحويل لموسيقى
+    if call.data.startswith("audio|"):
+        file_path = call.data.split("|")[1]
+        if not os.path.exists(file_path):
+            bot.answer_callback_query(call.id, "الملف انحذف، ابعت الرابط مرة تانية")
+            return
+        bot.answer_callback_query(call.id, "⏳ عم حوله لموسيقى...")
+        bot.send_chat_action(call.message.chat.id, 'upload_audio')
+        try:
+            base = os.path.splitext(file_path)[0]
+            mp3_file = base + ".mp3"
+            os.system(f'ffmpeg -y -i "{file_path}" -vn -ab 128k "{mp3_file}"')
+            with open(mp3_file, 'rb') as f:
+                bot.send_audio(call.message.chat.id, f, title="Audio")
+            os.remove(mp3_file)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"خطأ بالتحويل: {e}")
 
 @bot.message_handler(func=lambda m: True)
 def handle(message):
@@ -79,33 +96,30 @@ def handle(message):
     if not url.startswith("http"): return
     url = resolve_url(url)
     
-    # ===== الميزة الجديدة متل واتساب =====
     bot.send_chat_action(message.chat.id, 'upload_video')
     wait = bot.reply_to(message, "⏳ عم حمل... ثانية وحدة")
-    bot.send_chat_action(message.chat.id, 'upload_video')
     
     try:
         ydl_opts = {
             'format': 'bestvideo[height<=720][filesize<50M]+bestaudio/best[height<=720][filesize<50M]/best',
-            'outtmpl': '/tmp/%(id)s.%(ext)s','quiet': True,'noplaylist': True,'max_filesize': 50 * 1024 * 1024,
+            'outtmpl': '/tmp/%(id)s.%(ext)s','quiet': True,'noplaylist': True,
+            'max_filesize': 50 * 1024 * 1024,
             'http_headers': {'User-Agent': 'Mozilla/5.0'},'merge_output_format': 'mp4'
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file = ydl.prepare_filename(info)
-        if os.path.getsize(file) > 50 * 1024 * 1024:
-            os.remove(file)
-            bot.edit_message_text("❌ الفيديو كبير كتير", message.chat.id, wait.message_id)
-            return
-        bot.send_chat_action(message.chat.id, 'upload_video')
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🎵 حول لموسيقى MP3", callback_data=f"audio|{file}"))
+        
         with open(file, 'rb') as f:
-            bot.send_video(message.chat.id, f, caption="تم التحميل عبر @MyDownload2026_bot ✅", supports_streaming=True)
-        os.remove(file)
+            bot.send_video(message.chat.id, f, caption="✅ تم - اضغط تحت لتحويله لموسيقى", supports_streaming=True, reply_markup=markup)
         bot.delete_message(message.chat.id, wait.message_id)
+        # لا تحذف الملف فوراً مشان زر الموسيقى
     except Exception as e:
         err = str(e)
-        msg = f"فشل: {err[:200]}" if "Too Large" not in err else "❌ الفيديو حجمو كبير كتير"
-        bot.edit_message_text(msg, message.chat.id, wait.message_id)
+        bot.edit_message_text(f"فشل: {err[:200]}", message.chat.id, wait.message_id)
 
 @app.route(f"/{BOT_TOKEN}", methods=['POST'])
 def webhook():
